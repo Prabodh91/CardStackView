@@ -17,5 +17,6 @@ public class CardStackOption {
     public int rightOverlay = 0; // Layout Resource ID
     public int bottomOverlay = 0; // Layout Resource ID
     public int topOverlay = 0; // Layout Resource ID
-    public List<SwipeDirection> swipeDirection = SwipeDirection.FREEDOM;
+    public List<SwipeDirection> swipeForwardDirection = SwipeDirection.RIGHT;
+    public List<SwipeDirection> swipeReverseDirection = SwipeDirection.LEFT;
 }

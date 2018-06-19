@@ -17,6 +17,7 @@ import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
 
 import com.yuyakaido.android.cardstackview.internal.CardContainerView;
+import com.yuyakaido.android.cardstackview.internal.CardStackAdapterHelper;
 import com.yuyakaido.android.cardstackview.internal.CardStackOption;
 import com.yuyakaido.android.cardstackview.internal.CardStackState;
 import com.yuyakaido.android.cardstackview.internal.Util;
@@ -28,9 +29,13 @@ public class CardStackView extends FrameLayout {
 
     public interface CardEventListener {
         void onCardDragging(float percentX, float percentY);
+
         void onCardSwiped(SwipeDirection direction);
+
         void onCardReversed();
+
         void onCardMovedToOrigin();
+
         void onCardClicked(int index);
     }
 
@@ -38,6 +43,7 @@ public class CardStackView extends FrameLayout {
     private CardStackState state = new CardStackState();
 
     private BaseAdapter adapter = null;
+    private CardStackAdapterHelper helper = null;
     private LinkedList<CardContainerView> containers = new LinkedList<>();
     private CardEventListener cardEventListener = null;
     private DataSetObserver dataSetObserver = new DataSetObserver() {
@@ -59,10 +65,17 @@ public class CardStackView extends FrameLayout {
         public void onContainerDragging(float percentX, float percentY) {
             update(percentX, percentY);
         }
+
         @Override
-        public void onContainerSwiped(Point point, SwipeDirection direction) {
+        public void onContainerForwardSwiped(Point point, SwipeDirection direction) {
             swipe(point, direction);
         }
+
+        @Override
+        public void onContainerReverseSwiped(Point point, SwipeDirection direction) {
+            reverse(point, direction);
+        }
+
         @Override
         public void onContainerMovedToOrigin() {
             initializeCardStackPosition();
@@ -70,6 +83,7 @@ public class CardStackView extends FrameLayout {
                 cardEventListener.onCardMovedToOrigin();
             }
         }
+
         @Override
         public void onContainerClicked() {
             if (cardEventListener != null) {
@@ -97,7 +111,8 @@ public class CardStackView extends FrameLayout {
         setStackFrom(StackFrom.values()[array.getInt(R.styleable.CardStackView_stackFrom, option.stackFrom.ordinal())]);
         setElevationEnabled(array.getBoolean(R.styleable.CardStackView_elevationEnabled, option.isElevationEnabled));
         setSwipeEnabled(array.getBoolean(R.styleable.CardStackView_swipeEnabled, option.isSwipeEnabled));
-        setSwipeDirection(SwipeDirection.from(array.getInt(R.styleable.CardStackView_swipeDirection, 0)));
+        setSwipeForwardDirection(SwipeDirection.from(array.getInt(R.styleable.CardStackView_swipeForwardDirection, 2)));
+        setSwipeReverseDirection(SwipeDirection.from(array.getInt(R.styleable.CardStackView_swipeReverseDirection, 3)));
         setLeftOverlay(array.getResourceId(R.styleable.CardStackView_leftOverlay, 0));
         setRightOverlay(array.getResourceId(R.styleable.CardStackView_rightOverlay, 0));
         setBottomOverlay(array.getResourceId(R.styleable.CardStackView_bottomOverlay, 0));
@@ -134,6 +149,7 @@ public class CardStackView extends FrameLayout {
             CardContainerView view = (CardContainerView) LayoutInflater.from(getContext())
                     .inflate(R.layout.card_container, this, false);
             view.setDraggable(false);
+            view.setReverseAllowed(false);
             view.setCardStackOption(option);
             view.setOverlay(option.leftOverlay, option.rightOverlay, option.bottomOverlay, option.topOverlay);
             containers.add(0, view);
@@ -161,13 +177,15 @@ public class CardStackView extends FrameLayout {
                 if (parent.getChildCount() == 0) {
                     parent.addView(child);
                 }
+                container.setNoDragMessage(helper.getNoDragMessage(adapterIndex));
                 container.setVisibility(View.VISIBLE);
             } else {
                 container.setVisibility(View.GONE);
             }
         }
         if (!adapter.isEmpty()) {
-            getTopView().setDraggable(true);
+            getTopView().setDraggable(helper.isDraggable(0));
+            getTopView().setReverseAllowed(helper.isReverseAllowed(0));
         }
     }
 
@@ -189,8 +207,15 @@ public class CardStackView extends FrameLayout {
         }
 
         boolean hasCard = state.topIndex < adapter.getCount();
-        if (hasCard) {
+        if (hasCard && helper.isDraggable(state.topIndex)) {
             getTopView().setDraggable(true);
+        } else {
+            getTopView().setDraggable(false);
+        }
+        if (hasCard && helper.isReverseAllowed(state.topIndex)) {
+            getTopView().setReverseAllowed(true);
+        } else {
+            getTopView().setReverseAllowed(false);
         }
     }
 
@@ -268,10 +293,10 @@ public class CardStackView extends FrameLayout {
         } else if (direction == SwipeDirection.Right) {
             getTopView().showRightOverlay();
             getTopView().setOverlayAlpha(1f);
-        } else if (direction == SwipeDirection.Bottom){
+        } else if (direction == SwipeDirection.Bottom) {
             getTopView().showBottomOverlay();
             getTopView().setOverlayAlpha(1f);
-        } else if (direction == SwipeDirection.Top){
+        } else if (direction == SwipeDirection.Top) {
             getTopView().showTopOverlay();
             getTopView().setOverlayAlpha(1f);
         }
@@ -323,7 +348,11 @@ public class CardStackView extends FrameLayout {
         containers.getFirst().setDraggable(false);
         if (containers.size() > 1) {
             containers.get(1).setContainerEventListener(containerEventListener);
-            containers.get(1).setDraggable(true);
+            if (state.topIndex < state.lastCount) {
+                containers.get(1).setDraggable(helper.isDraggable(state.topIndex + 1));
+            } else {
+                containers.get(1).setDraggable(true);
+            }
         }
     }
 
@@ -360,7 +389,24 @@ public class CardStackView extends FrameLayout {
         containers.getLast().setContainerEventListener(null);
         containers.getFirst().setContainerEventListener(containerEventListener);
 
-        getTopView().setDraggable(true);
+        getTopView().setDraggable(helper.isDraggable(state.topIndex));
+        getTopView().setReverseAllowed(helper.isReverseAllowed(state.topIndex));
+    }
+
+    private void executePostReverseTask(final Point point, final SwipeDirection direction) {
+        initializeCardStackPosition();
+
+        state.topIndex--;
+
+        if (cardEventListener != null) {
+            cardEventListener.onCardReversed();
+        }
+
+        containers.getLast().setContainerEventListener(null);
+        containers.getFirst().setContainerEventListener(containerEventListener);
+
+        getTopView().setDraggable(helper.isDraggable(state.topIndex));
+        getTopView().setReverseAllowed(helper.isReverseAllowed(state.topIndex));
     }
 
     public void setCardEventListener(CardEventListener listener) {
@@ -370,6 +416,9 @@ public class CardStackView extends FrameLayout {
     public void setAdapter(BaseAdapter adapter) {
         if (this.adapter != null) {
             this.adapter.unregisterDataSetObserver(dataSetObserver);
+        }
+        if (adapter instanceof CardStackAdapterHelper) {
+            this.helper = (CardStackAdapterHelper) adapter;
         }
         this.adapter = adapter;
         this.adapter.registerDataSetObserver(dataSetObserver);
@@ -426,8 +475,15 @@ public class CardStackView extends FrameLayout {
         }
     }
 
-    public void setSwipeDirection(List<SwipeDirection> swipeDirection) {
-        option.swipeDirection = swipeDirection;
+    public void setSwipeForwardDirection(List<SwipeDirection> swipeForwardDirection) {
+        option.swipeForwardDirection = swipeForwardDirection;
+        if (adapter != null) {
+            initialize(false);
+        }
+    }
+
+    public void setSwipeReverseDirection(List<SwipeDirection> swipeReverseDirection) {
+        option.swipeReverseDirection = swipeReverseDirection;
         if (adapter != null) {
             initialize(false);
         }
@@ -483,6 +539,20 @@ public class CardStackView extends FrameLayout {
                 executePostSwipeTask(new Point(0, -2000), direction);
             }
         });
+    }
+
+    public void reverse(final Point point, final SwipeDirection direction) {
+        if (state.topIndex > 0) {
+            performSwipe(point, null);
+            ViewGroup parent = containers.getLast();
+            View prevView = adapter.getView(state.topIndex - 1, null, parent);
+            performReverse(new Point(2000, 0), prevView, new AnimatorListenerAdapter() {
+                @Override
+                public void onAnimationEnd(Animator animator) {
+                    executePostReverseTask(new Point(2000, 0), direction);
+                }
+            });
+        }
     }
 
     public void reverse() {

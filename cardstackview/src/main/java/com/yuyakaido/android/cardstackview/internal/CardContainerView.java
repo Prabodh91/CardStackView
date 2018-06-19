@@ -10,8 +10,12 @@ import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.animation.AlphaAnimation;
+import android.view.animation.Animation;
+import android.view.animation.AnimationSet;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
+import android.widget.Toast;
 
 import com.yuyakaido.android.cardstackview.R;
 import com.yuyakaido.android.cardstackview.SwipeDirection;
@@ -26,6 +30,8 @@ public class CardContainerView extends FrameLayout {
     private float motionOriginY = 0f;
     private boolean isDragging = false;
     private boolean isDraggable = true;
+    private boolean isReverseAllowed = false;
+    private String noDragMessage;
 
     private ViewGroup contentContainer = null;
     private ViewGroup overlayContainer = null;
@@ -33,6 +39,7 @@ public class CardContainerView extends FrameLayout {
     private View rightOverlayView = null;
     private View bottomOverlayView = null;
     private View topOverlayView = null;
+    private Toast mNoDragToast = null;
 
     private ContainerEventListener containerEventListener = null;
     private GestureDetector.SimpleOnGestureListener gestureListener = new GestureDetector.SimpleOnGestureListener() {
@@ -46,10 +53,19 @@ public class CardContainerView extends FrameLayout {
     };
     private GestureDetector gestureDetector = new GestureDetector(getContext(), gestureListener);
 
+    public void setReverseAllowed(boolean isReverseAllowed) {
+        this.isReverseAllowed = isReverseAllowed;
+    }
+
     public interface ContainerEventListener {
         void onContainerDragging(float percentX, float percentY);
-        void onContainerSwiped(Point point, SwipeDirection direction);
+
+        void onContainerForwardSwiped(Point point, SwipeDirection direction);
+
+        void onContainerReverseSwiped(Point point, SwipeDirection direction);
+
         void onContainerMovedToOrigin();
+
         void onContainerClicked();
     }
 
@@ -78,6 +94,8 @@ public class CardContainerView extends FrameLayout {
         gestureDetector.onTouchEvent(event);
 
         if (!option.isSwipeEnabled || !isDraggable) {
+            handleActionShake(event);
+//            showNoDragToast();
             return true;
         }
 
@@ -154,7 +172,7 @@ public class CardContainerView extends FrameLayout {
                     radian = Math.toRadians(degree);
                     if (Math.cos(radian) < 0.5) {
                         direction = SwipeDirection.Bottom;
-                    }else{
+                    } else {
                         direction = SwipeDirection.Right;
                     }
                     break;
@@ -168,9 +186,18 @@ public class CardContainerView extends FrameLayout {
             }
 
             if (Math.abs(percent) > option.swipeThreshold) {
-                if (option.swipeDirection.contains(direction)) {
+                if (option.swipeForwardDirection.contains(direction)) {
                     if (containerEventListener != null) {
-                        containerEventListener.onContainerSwiped(point, direction);
+                        containerEventListener.onContainerForwardSwiped(point, direction);
+                    }
+                } else if (option.swipeReverseDirection.contains(direction)) {
+                    if (containerEventListener != null && isReverseAllowed) {
+                        containerEventListener.onContainerReverseSwiped(point, direction);
+                    } else {
+                        moveToOrigin();
+                        if (containerEventListener != null) {
+                            containerEventListener.onContainerMovedToOrigin();
+                        }
                     }
                 } else {
                     moveToOrigin();
@@ -202,6 +229,45 @@ public class CardContainerView extends FrameLayout {
         }
     }
 
+    private void handleActionShake(MotionEvent event) {
+        View view = findViewById(R.id.fab);
+        if (view != null) {
+            blink(view);
+        } else {
+            shake(getContext(), this);
+        }
+
+        showNoDragToast();
+    }
+
+    private void shake(Context context, View view) {
+
+    }
+
+    private void blink(View view) {
+
+        Animation anim = new AlphaAnimation(0.0F, 1.0F);
+        anim.setDuration(500L);
+        anim.setStartOffset(20L);
+        anim.setRepeatMode(2);
+        anim.setRepeatCount(-1);
+        view.startAnimation(anim);
+
+        //        Animation blink = android.view.animation.AnimationUtils.loadAnimation(getContext(), anim.blink);
+//        view.startAnimation(blink);
+    }
+
+    private void showNoDragToast() {
+//        if (!TextUtils.isEmpty(noDragMessage))
+//            Snackbar.make(this, noDragMessage, Snackbar.LENGTH_SHORT);
+        if (mNoDragToast == null) {
+            mNoDragToast = Toast.makeText(getContext(), noDragMessage, Toast.LENGTH_SHORT);
+            mNoDragToast.show();
+        }
+
+
+    }
+
     private void updateTranslation(MotionEvent event) {
         ViewCompat.setTranslationX(this, viewOriginX + event.getRawX() - motionOriginX);
         ViewCompat.setTranslationY(this, viewOriginY + event.getRawY() - motionOriginY);
@@ -215,14 +281,14 @@ public class CardContainerView extends FrameLayout {
         float percentX = getPercentX();
         float percentY = getPercentY();
 
-        if (Math.abs(percentX) > Math.abs(percentY)){
+        if (Math.abs(percentX) > Math.abs(percentY)) {
             if (percentX < 0) {
                 showLeftOverlay();
             } else {
                 showRightOverlay();
             }
             setOverlayAlpha(Math.abs(percentX));
-        }else{
+        } else {
             if (percentY < 0) {
                 showTopOverlay();
             } else {
@@ -253,6 +319,10 @@ public class CardContainerView extends FrameLayout {
 
     public void setDraggable(boolean isDraggable) {
         this.isDraggable = isDraggable;
+    }
+
+    public void setNoDragMessage(String noDragMessage) {
+        this.noDragMessage = noDragMessage;
     }
 
     public void reset() {
